@@ -2,10 +2,21 @@ const express = require("express");
 const cors = require("cors");
 const socketIO = require("socket.io");
 const format = require("./utils/FormatMSG");
+const { getDisconnectUser, getRoomUsers, saveUser } = require("./user");
+const mongooe = require("mongoose");
+require("dotenv").config();
+const Message = require("./models/message");
+const messageController = require("./controllers/messageController");
 
 const app = express();
 
+mongooe.connect(process.env.MONGO_URL).then(() => {
+  console.log("Connected to DB.");
+});
+
 app.use(cors());
+
+app.get("/chat/:roomName", messageController.getOldMessage);
 
 const server = app.listen(4000, (_) => {
   console.log("Server is running on 4000");
@@ -14,25 +25,6 @@ const server = app.listen(4000, (_) => {
 const io = socketIO(server, {
   cors: "*",
 });
-
-const users = [];
-
-const saveUser = (id, username, room) => {
-  const user = { id, username, room };
-  users.push(user);
-  return user;
-};
-
-const getDisconnectUser = (id) => {
-  const index = users.findIndex((user) => user.id === id);
-  if (id !== -1) {
-    return users.splice(index, 1)[0];
-  }
-};
-
-const getRoomUsers = (room) => {
-  return users.filter((user) => user.room === room);
-};
 
 io.on("connection", (socket) => {
   console.log("Client connected");
@@ -48,8 +40,15 @@ io.on("connection", (socket) => {
       .to(user.room)
       .emit("message", format(Bot, user.username + ` joined the room.`));
 
+    // Listen Message from client
     socket.on("message_send", (data) => {
       io.to(user.room).emit("message", format(user.username, data));
+      // stored messages in DB
+      Message.create({
+        username: user.username,
+        message: data,
+        room: user.room,
+      });
     });
 
     io.to(user.room).emit("room_users", getRoomUsers(user.room));
@@ -62,6 +61,7 @@ io.on("connection", (socket) => {
         "message",
         format(Bot, user.username + ` left the room.`)
       );
+      io.to(user.room).emit("room_users", getRoomUsers(user.room));
     }
   });
 });
